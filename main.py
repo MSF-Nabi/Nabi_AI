@@ -171,6 +171,6 @@ async def query_api(query: Query):
     
 @app.get("/")
 def read_root():
-    return {"Hello": "World"}
+    return {"Hello": "Worldsss"}
 
 # 서버 실행: uvicorn main:app --reload
