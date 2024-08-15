@@ -165,5 +165,9 @@ async def query_api(query: Query):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/")
+def read_root():
+    return {"Hello": "World"}
 
 # 서버 실행: uvicorn main:app --reload
