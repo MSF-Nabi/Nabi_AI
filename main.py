@@ -56,7 +56,7 @@ def get_kst_now():
     return kst_now.strftime('%B %d, %Y')
 
 # 일상 대화 및 공감 챗봇을 위한 프롬프트 생성 함수
-def create_prompt(conversation: list[str], new_question: str, retrieved_context: str) -> dict:
+def create_prompt(conversation: List[str], new_question: str, retrieved_context: str) -> dict:
     today = get_kst_now()  # 현재 날짜를 가져옴
     system_message = f"""
     너는 user와 매우 친한 친구야. 그리고 아는 것이 매우 많아.
