@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from typing import List
 import os
 import re
-
+from dotenv import load_dotenv
 # FastAPI 초기화
 app = FastAPI()
 
@@ -36,7 +36,8 @@ class Query(BaseModel):
     chatHistory: List[str]
 
 # 환경 변수 또는 직접 설정으로부터 OpenAI API 키 가져오기
-openai_api_key = os.getenv("OPENAI_API_KEY", "sk-proj-GLrTkfwhtlbbbSDYyhj7T3BlbkFJ5T2CHFn0zPtIB3wYKdXR")
+load_dotenv()
+openai_api_key = os.getenv("OPENAI_API_KEY")
 
 # Embeddings와 ChromaDB 초기화
 embedding = OpenAIEmbeddings(openai_api_key=openai_api_key)
