@@ -84,6 +84,19 @@ def create_prompt(conversation: list[str], new_question: str, retrieved_context:
 @app.post("/add_diary")
 async def add_diary(entry: DiaryEntry):
     try:
+        results = vectordb.get(where={"userId": entry.userId})
+        if "ids" in results:
+            ids_to_delete = results["ids"]
+
+            # ids_to_delete를 출력하여 확인 (디버깅용)
+            #print("IDs to delete:", ids_to_delete)
+
+            # 가져온 ID들로 삭제를 수행
+            if ids_to_delete:
+                vectordb.delete(ids=ids_to_delete)
+
+
+
         # 날짜 패턴에 맞춰 일기를 분리하고, 정규식에서 "날짜: 내용"을 추출
         diary_entries = re.findall(r"(\d{4}-\d{2}-\d{2}): ([^\n]+)", entry.summarizedDiary)
         # 각 날짜별 일기를 처리
@@ -154,14 +167,15 @@ async def query_api(query: Query):
         prompt = prompt_template.format(**prompt_dict)
 
         # GPT 모델 초기화
-        gpt_model = ChatOpenAI(model="gpt-4", openai_api_key=openai_api_key)
+        gpt_model = ChatOpenAI(model="gpt-4o-mini", openai_api_key=openai_api_key)
 
         # 모델에 프롬프트 전달
         response = gpt_model([HumanMessage(content=prompt)])
 
         # 모델의 응답을 대화 기록에 추가
         user_conversation.append(f"assistant: {response.content}")
-        print(user_conversation)
+        #print(prompt)
+        #print(user_conversation)
         return {"message": response.content}
 
     except Exception as e:
