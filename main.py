@@ -1,8 +1,10 @@
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from langchain.vectorstores import Chroma
-from langchain.embeddings.openai import OpenAIEmbeddings
+# from langchain.vectorstores import Chroma
+# from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain_community.vectorstores import Chroma
+from langchain_community.embeddings import OpenAIEmbeddings
 from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage
 from langchain_core.prompts import PromptTemplate
@@ -54,7 +56,7 @@ def get_kst_now():
     return kst_now.strftime('%B %d, %Y')
 
 # 일상 대화 및 공감 챗봇을 위한 프롬프트 생성 함수
-def create_prompt(conversation: list[str], new_question: str, retrieved_context: str) -> dict:
+def create_prompt(conversation: List[str], new_question: str, retrieved_context: str) -> dict:
     today = get_kst_now()  # 현재 날짜를 가져옴
     system_message = f"""
     너는 user와 매우 친한 친구야. 그리고 아는 것이 매우 많아.
@@ -183,6 +185,6 @@ async def query_api(query: Query):
     
 @app.get("/")
 def read_root():
-    return {"Hello": "World"}
+    return {"test": "test"}
 
 # 서버 실행: uvicorn main:app --reload
