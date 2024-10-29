@@ -1,11 +1,9 @@
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-# from langchain.vectorstores import Chroma
-# from langchain.embeddings.openai import OpenAIEmbeddings
-from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import OpenAIEmbeddings
 from langchain_openai import ChatOpenAI
+from langchain_chroma import Chroma
+from langchain_openai import OpenAIEmbeddings
 from langchain.schema import HumanMessage
 from langchain_core.prompts import PromptTemplate
 from pydantic import BaseModel
@@ -109,7 +107,6 @@ async def add_diary(entry: DiaryEntry):
             vectordb.add_texts([content], metadatas=[{"userId": entry.userId, "date": date}], embedding=[embedding_vector])
 
         # 변경 사항을 영구적으로 저장
-        vectordb.persist()
 
         return {"message": "Diary entries have been successfully embedded and saved."}
     except Exception as e:
@@ -128,7 +125,7 @@ async def query_api(query: Query):
         retriever_with_user_id = vectordb.as_retriever(search_kwargs={"k": 3, "filter": {"userId": user_id}})
 
         # 최신 메서드 invoke 사용
-        retrieved_docs = retriever_with_user_id.get_relevant_documents(query.question)
+        retrieved_docs = retriever_with_user_id.invoke(query.question)
 
         # 중복 제거 및 날짜와 함께 내용 결합
         unique_docs = {}
@@ -172,7 +169,7 @@ async def query_api(query: Query):
         gpt_model = ChatOpenAI(model="gpt-4o-mini", openai_api_key=openai_api_key)
 
         # 모델에 프롬프트 전달
-        response = gpt_model([HumanMessage(content=prompt)])
+        response = gpt_model.invoke([HumanMessage(content=prompt)])
 
         # 모델의 응답을 대화 기록에 추가
         user_conversation.append(f"assistant: {response.content}")
