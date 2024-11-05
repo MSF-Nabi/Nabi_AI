@@ -6,7 +6,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/nabi_ai
+  IMAGE_NAME: ${{ github.repository_owner | toLowerCase }}/nabi_ai
   NAME: nabi
 
 jobs:
