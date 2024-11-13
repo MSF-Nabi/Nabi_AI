@@ -58,7 +58,7 @@ jobs:
 
       - name: Decode and create .env file
         run: |
-          echo "${{ secrets.APPLICATION_SECRET_YML }}" | base64 -d > .env
+          echo "${{ secrets.OPENAI_API_KEY }}" | base64 -d > .env
 
       - name: Check OPENAI_API_KEY (Safely)
         env:
