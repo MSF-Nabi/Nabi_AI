@@ -38,7 +38,6 @@ jobs:
         push: true
         tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
-
   deploy:
     needs: build-and-push
     runs-on: [ self-hosted, label-nabi ]
@@ -61,6 +60,17 @@ jobs:
         run: |
           echo "${{ secrets.APPLICATION_SECRET_YML }}" | base64 -d > .env
 
+      - name: Check OPENAI_API_KEY (Safely)
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -n "$OPENAI_API_KEY" ]; then
+            echo "OPENAI_API_KEY is set and not empty"
+            echo "First 4 characters of OPENAI_API_KEY: ${OPENAI_API_KEY:0:4}****"
+          else
+            echo "OPENAI_API_KEY is not set or empty"
+          fi
+
       - name: Deploy to server
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -72,3 +82,8 @@ jobs:
             --env-file ${{ github.workspace }}/.env \
             -e OPENAI_API_KEY=$OPENAI_API_KEY \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+      - name: Verify OPENAI_API_KEY in container
+        run: |
+          echo "Checking OPENAI_API_KEY in the container:"
+          docker exec ${{ env.NAME }} sh -c 'if [ -n "$OPENAI_API_KEY" ]; then echo "OPENAI_API_KEY is set in the container"; else echo "OPENAI_API_KEY is not set in the container"; fi'
