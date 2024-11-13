@@ -38,6 +38,7 @@ jobs:
         push: true
         tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
+
   deploy:
     needs: build-and-push
     runs-on: [ self-hosted, label-nabi ]
