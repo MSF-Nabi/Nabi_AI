@@ -125,6 +125,7 @@ async def add_diary(entry: DiaryEntry):
 async def query_api(query: Query):
     try:
         logger.info(f"Received query for user: {query.userId}")
+        logger.info(openai_api_key)
         user_id = query.userId
         # 사용자로부터 받은 채팅 내역 사용
         user_conversation = query.chatHistory
