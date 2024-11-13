@@ -6,7 +6,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/nabi_ai
+  IMAGE_NAME: msf-nabi/nabi_ai
   NAME: nabi
 
 jobs:
@@ -56,9 +56,15 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
+    - name: Decode and create .env file
+      run: |
+        echo "${{ secrets.APPLICATION_SECRET_YML }}" | base64 -d > .env
+
     - name: Deploy to server
       run: |
         docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
         docker stop ${{ env.NAME }} || true
         docker rm ${{ env.NAME }} || true
-        docker run -d -p 8000:8000 --name ${{ env.NAME }} --restart always ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+        docker run -d -p 8000:8000 --name ${{ env.NAME }} --restart always \
+          --env-file $(pwd)/.env \  # .env 파일을 컨테이너에 전달
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
