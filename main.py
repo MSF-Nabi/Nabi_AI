@@ -11,13 +11,12 @@ from typing import List
 import os
 import re
 from dotenv import load_dotenv
-# FastAPI 초기화
+
 app = FastAPI()
 
-# CORS 설정
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # 필요한 도메인으로 제한하는 것이 좋음
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
