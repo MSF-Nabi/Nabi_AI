@@ -66,5 +66,5 @@ jobs:
         docker stop ${{ env.NAME }} || true
         docker rm ${{ env.NAME }} || true
         docker run -d -p 8000:8000 --name ${{ env.NAME }} --restart always \
-          --env-file $(pwd)/.env \  # .env 파일을 컨테이너에 전달
+          --env-file ${{ github.workspace }}/.env \
           ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
