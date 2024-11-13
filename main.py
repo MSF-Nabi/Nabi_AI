@@ -11,9 +11,11 @@ from typing import List
 import os
 import re
 from dotenv import load_dotenv
+import logging
 
 app = FastAPI()
-
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # 필요한 도메인으로 제한하는 것이 좋음
@@ -41,10 +43,20 @@ embedding = OpenAIEmbeddings(openai_api_key=openai_api_key)
 persist_directory = 'db'
 
 # ChromaDB 로드 또는 초기화
-vectordb = Chroma(
-    persist_directory=persist_directory,
-    embedding_function=embedding
-)
+try:
+    logger.info("Initializing OpenAIEmbeddings")
+    embedding = OpenAIEmbeddings(openai_api_key=openai_api_key)
+    logger.info("OpenAIEmbeddings initialized successfully")
+
+    logger.info("Initializing Chroma database")
+    vectordb = Chroma(
+        persist_directory=persist_directory,
+        embedding_function=embedding
+    )
+    logger.info("Chroma database initialized successfully")
+except Exception as e:
+    logger.error(f"Error during initialization: {str(e)}", exc_info=True)
+    raise
 
 # 한국 시간으로 현재 날짜와 시간 가져오기 함수
 def get_kst_now():
@@ -83,6 +95,7 @@ def create_prompt(conversation: List[str], new_question: str, retrieved_context:
 @app.post("/add_diary")
 async def add_diary(entry: DiaryEntry):
     try:
+        logger.info(f"Adding diary entry for user: {entry.userId}")
         results = vectordb.get(where={"userId": entry.userId})
         if "ids" in results:
             ids_to_delete = results["ids"]
@@ -93,9 +106,6 @@ async def add_diary(entry: DiaryEntry):
             # 가져온 ID들로 삭제를 수행
             if ids_to_delete:
                 vectordb.delete(ids=ids_to_delete)
-
-
-
         # 날짜 패턴에 맞춰 일기를 분리하고, 정규식에서 "날짜: 내용"을 추출
         diary_entries = re.findall(r"(\d{4}-\d{2}-\d{2}): ([^\n]+)", entry.summarizedDiary)
         # 각 날짜별 일기를 처리
@@ -104,17 +114,17 @@ async def add_diary(entry: DiaryEntry):
             embedding_vector = embedding.embed_query(content)
             # 벡터DB에 저장
             vectordb.add_texts([content], metadatas=[{"userId": entry.userId, "date": date}], embedding=[embedding_vector])
-
-        # 변경 사항을 영구적으로 저장
-
+        logger.info("Diary entries successfully added")
         return {"message": "Diary entries have been successfully embedded and saved."}
     except Exception as e:
+        logger.error(f"Error adding diary entry: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 # 챗봇 쿼리를 처리하는 엔드포인트
 @app.post("/query")
 async def query_api(query: Query):
     try:
+        logger.info(f"Received query for user: {query.userId}")
         user_id = query.userId
         # 사용자로부터 받은 채팅 내역 사용
         user_conversation = query.chatHistory
@@ -124,7 +134,9 @@ async def query_api(query: Query):
         retriever_with_user_id = vectordb.as_retriever(search_kwargs={"k": 3, "filter": {"userId": user_id}})
 
         # 최신 메서드 invoke 사용
+        logger.info("Retrieving documents from Chroma")
         retrieved_docs = retriever_with_user_id.invoke(query.question)
+        logger.info(f"Retrieved {len(retrieved_docs)} documents")
 
         # 중복 제거 및 날짜와 함께 내용 결합
         unique_docs = {}
@@ -172,11 +184,13 @@ async def query_api(query: Query):
 
         # 모델의 응답을 대화 기록에 추가
         user_conversation.append(f"assistant: {response.content}")
-        #print(prompt)
-        #print(user_conversation)
-        return {"message": response.content}
+        logger.info("Generating response from GPT model")
+        response = gpt_model.invoke([HumanMessage(content=prompt)])
+        logger.info("Response generated successfully")
 
+        return {"message": response.content}
     except Exception as e:
+        logger.error(f"Error processing query: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
     
 @app.get("/")
