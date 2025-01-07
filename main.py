@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from fastapi import FastAPI, HTTPException
+from fastapi import HTTPException, security
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_openai import ChatOpenAI
 from langchain_chroma import Chroma
@@ -12,7 +12,9 @@ import os
 import re
 from dotenv import load_dotenv
 import logging
-from datetime import date
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import FastAPI, Depends
+from fastapi.security import OAuth2PasswordBearer
 
 app = FastAPI()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -49,6 +51,7 @@ class Query(BaseModel):
 
 # 환경 변수 또는 직접 설정으로부터 OpenAI API 키 가져오기
 load_dotenv()
+security = HTTPBearer()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 
 # Embeddings와 ChromaDB 초기화
@@ -104,9 +107,26 @@ def create_prompt(conversation: List[str], new_question: str, retrieved_context:
     }
     return inputs
 
+
+def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    if credentials:
+        # "Bearer" 스키마인지 확인
+        if credentials.scheme != "Bearer":
+            raise HTTPException(status_code=403, detail="잘못된 인증 스키마")
+
+        # 실제 토큰 검증 (openai_api_key와 비교)
+        openai_api_key = "your_openai_api_key"  # 여기에 실제 OpenAI API 키를 설정
+        if not credentials.credentials or credentials.credentials != openai_api_key:
+            raise HTTPException(status_code=403, detail="잘못된 토큰")
+
+        return credentials.credentials
+    else:
+        raise HTTPException(status_code=403, detail="인증 정보가 없습니다")
+
+
 # 일기 항목을 추가하는 엔드포인트
 @app.post("/diarys")
-async def add_diarys(entry: DiarysEntrys):
+async def add_diarys(entry: DiarysEntrys, credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
         logger.info(f"Adding diary entry for user: {entry.userId}")
         results = vectordb.get(where={"userId": entry.userId})
@@ -134,7 +154,7 @@ async def add_diarys(entry: DiarysEntrys):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/diary")
-async def add_diary(entry: DiaryEntry):
+async def add_diary(entry: DiaryEntry, credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
         logger.info(f"Adding diary entry for user: {entry.userId}")
         content = entry.content
@@ -149,7 +169,7 @@ async def add_diary(entry: DiaryEntry):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.put("/diary")
-async def update_diary(entry: UpdateDiaryEntry):
+async def update_diary(entry: UpdateDiaryEntry, credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
         logger.info(f"Adding diary entry for user: {entry.userId}")
         content = entry.content
@@ -166,7 +186,7 @@ async def update_diary(entry: UpdateDiaryEntry):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/diary")
-async def delete_diary(id: str):
+async def delete_diary(id: str, credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
         logger.info(f"Deleting diary entry for user: {id}")
 
@@ -178,7 +198,7 @@ async def delete_diary(id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/diary")
-async def get_diary(id: str):
+async def get_diary(id: str, credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
         # 벡터 DB에서 유저 ID와 날짜를 기준으로 다이어리 조회
         diary_entry = vectordb.get(ids=id)
@@ -195,7 +215,7 @@ async def get_diary(id: str):
 
 # 챗봇 쿼리를 처리하는 엔드포인트
 @app.post("/query")
-async def query_api(query: Query):
+async def query_api(query: Query, credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
         logger.info(f"Received query for user: {query.userId}")
         logger.info(openai_api_key)
