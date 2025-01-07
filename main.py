@@ -289,7 +289,7 @@ async def query_api(query: Query, credentials: HTTPAuthorizationCredentials = De
     
 @app.get("/")
 def read_root():
-    return {"test": "test3"}
+    return {"test": "success"}
 
 # 서버 실행: uvicorn main:app --reload
 # 8f9451a8-f15d-4ec5-8213-97f587982164
