@@ -67,6 +67,10 @@ jobs:
             echo "OPENAI_API_KEY is not set or empty"
           fi
 
+      - name: Create .env file
+        run: |
+          echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" > ${{ github.workspace }}/.env
+
       - name: Deploy to server
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
