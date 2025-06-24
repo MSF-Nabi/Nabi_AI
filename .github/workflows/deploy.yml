@@ -1,4 +1,4 @@
-name: Deploy with Docker
+name: Deploy with Docker and Setup Nginx + SSL
 
 on:
   push:
@@ -8,6 +8,7 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: msf-nabi/nabi_ai
   NAME: nabi
+  DOMAIN: llm.msf-nabi3.co.kr
 
 jobs:
   build-and-push:
@@ -17,61 +18,47 @@ jobs:
       packages: write
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-    - name: Lowercase the image name
-      run: |
-        echo "IMAGE_NAME=$(echo ${{ env.IMAGE_NAME }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+      - name: Lowercase image name
+        run: echo "IMAGE_NAME=$(echo ${{ env.IMAGE_NAME }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
-    - name: Log in to the Container registry
-      uses: docker/login-action@v3
-      with:
-        registry: ${{ env.REGISTRY }}
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Build and push Docker image
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        push: true
-        tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-
-  deploy:
-    needs: build-and-push
-    runs-on: [ self-hosted, label-nabi ]
-    permissions:
-      contents: read
-      packages: read
-    steps:
-      - name: Lowercase the image name
-        run: |
-          echo "IMAGE_NAME=$(echo ${{ env.IMAGE_NAME }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
-
-      - name: Log in to the Container registry
+      - name: Log in to registry
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Check OPENAI_API_KEY (Safely)
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: |
-          if [ -n "$OPENAI_API_KEY" ]; then
-            echo "OPENAI_API_KEY is set and not empty"
-            echo "First 4 characters of OPENAI_API_KEY: ${OPENAI_API_KEY:0:4}****"
-          else
-            echo "OPENAI_API_KEY is not set or empty"
-          fi
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+  deploy:
+    needs: build-and-push
+    runs-on: [ self-hosted, label-nabi ]  # EC2 또는 SSH 연결 가능한 러너
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Lowercase image name
+        run: echo "IMAGE_NAME=$(echo ${{ env.IMAGE_NAME }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - name: Log in to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create .env file
-        run: |
-          echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" > ${{ github.workspace }}/.env
+        run: echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" > ${{ github.workspace }}/.env
 
-      - name: Deploy to server
+      - name: Deploy Docker container
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
@@ -83,7 +70,26 @@ jobs:
             -e OPENAI_API_KEY=$OPENAI_API_KEY \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
-      - name: Verify OPENAI_API_KEY in container
+      - name: Install Nginx and Setup SSL + Reverse Proxy
         run: |
-          echo "Checking OPENAI_API_KEY in the container:"
-          docker exec ${{ env.NAME }} sh -c 'if [ -n "$OPENAI_API_KEY" ]; then echo "OPENAI_API_KEY is set in the container"; else echo "OPENAI_API_KEY is not set in the container"; fi'
+          sudo apt update
+          sudo apt install -y nginx certbot python3-certbot-nginx
+
+          # Nginx 리버스 프록시 설정
+          echo "server {
+            listen 80;
+            server_name $DOMAIN;
+            location / {
+              proxy_pass http://localhost:8000;
+              proxy_set_header Host \$host;
+              proxy_set_header X-Real-IP \$remote_addr;
+            }
+          }" | sudo tee /etc/nginx/sites-available/fastapi
+
+          sudo ln -sf /etc/nginx/sites-available/fastapi /etc/nginx/sites-enabled/
+          sudo nginx -t
+          sudo systemctl reload nginx
+
+          # SSL 인증서 발급 및 자동 리다이렉션 설정
+          sudo certbot --nginx -d $DOMAIN --non-interactive --agree-tos -m zidwkd00@naver.com --redirect
+          sudo systemctl reload nginx
