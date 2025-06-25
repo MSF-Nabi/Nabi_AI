@@ -206,8 +206,6 @@ async def get_diary(id: str, credentials: HTTPAuthorizationCredentials = Depends
         raise HTTPException(status_code=500, detail=str(e))
 
 
-import traceback  # 스택트레이스 추적용
-
 @app.post("/query")
 async def query_api(query: Query, credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
@@ -220,14 +218,10 @@ async def query_api(query: Query, credentials: HTTPAuthorizationCredentials = De
             n_results=3,
             where={"userId": query.userId}
         )
-
-        # documents 비어있으면 IndexError 발생 방지
-        if not results.get("documents") or not results["documents"][0]:
-            raise ValueError("No documents retrieved from ChromaDB")
+        print(results)
 
         retrieved_context = "\n\n".join(
-            [f"{result['metadata']['date']}: {result['document']}" for result in results['documents'][0]]
-        )
+            [f"{result['metadata']['date']}: {result['document']}" for result in results['documents'][0]])
 
         prompt_dict = create_prompt(user_conversation, query.question, retrieved_context)
         prompt_template = PromptTemplate(
@@ -256,27 +250,9 @@ async def query_api(query: Query, credentials: HTTPAuthorizationCredentials = De
         logger.info("Response generated successfully")
 
         return {"message": response.content}
-
     except Exception as e:
-        # 에러의 상세한 정보 추출
-        error_type = type(e).__name__
-        error_message = str(e)
-        traceback_str = traceback.format_exc()
-
-        logger.error(f"Error processing query: {error_message}", exc_info=True)
-
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error_type": error_type,
-                "error_message": error_message,
-                "traceback": traceback_str,
-                "userId": query.userId,
-                "question": query.question,
-                "chatHistoryLength": len(query.chatHistory)
-            }
-        )
-
+        logger.error(f"Error processing query: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/")
