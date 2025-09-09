@@ -220,8 +220,14 @@ async def query_api(query: Query, credentials: HTTPAuthorizationCredentials = De
         )
         print(results)
 
+        logger.info(f"Documents in results: {results['documents']}")
+
+        # 안전하게 doc 타입에 따라 처리 분기
         retrieved_context = "\n\n".join(
-            [f"{result['metadata']['date']}: {result['document']}" for result in results['documents'][0]])
+            doc if isinstance(doc,
+                              str) else f"{doc.get('metadata', {}).get('date', 'unknown date')}: {doc.get('document', '')}"
+            for doc in results['documents'][0]
+        )
 
         prompt_dict = create_prompt(user_conversation, query.question, retrieved_context)
         prompt_template = PromptTemplate(
