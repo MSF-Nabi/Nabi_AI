@@ -216,7 +216,7 @@ async def query_api(query: Query, credentials: HTTPAuthorizationCredentials = De
         results = collection.query(
             query_texts=[query.question],
             n_results=3,
-            where={"userId": query.userId}
+            where={"userId": str(query.userId)}
         )
         print(results)
 
