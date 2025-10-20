@@ -3,8 +3,8 @@ from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
-from langchain.schema import HumanMessage
 from langchain_core.prompts import PromptTemplate
 from pydantic import BaseModel
 from typing import List
@@ -219,14 +219,15 @@ async def query_api(query: Query, credentials: HTTPAuthorizationCredentials = De
             where={"userId": str(query.userId)}
         )
         print(results)
+        logger.info(f"Documents in results: {results.get('documents')}")
 
-        logger.info(f"Documents in results: {results['documents']}")
-
-        # 안전하게 doc 타입에 따라 처리 분기
+        # 안전 처리: 검색 결과가 비었을 때
+        docs_batches = (results or {}).get("documents") or []
+        docs = docs_batches[0] if docs_batches else []
         retrieved_context = "\n\n".join(
-            doc if isinstance(doc,
-                              str) else f"{doc.get('metadata', {}).get('date', 'unknown date')}: {doc.get('document', '')}"
-            for doc in results['documents'][0]
+            doc if isinstance(doc, str)
+            else f"{(doc.get('metadata') or {}).get('date', 'unknown date')}: {doc.get('document', '')}"
+            for doc in docs
         )
 
         prompt_dict = create_prompt(user_conversation, query.question, retrieved_context)
@@ -249,13 +250,24 @@ async def query_api(query: Query, credentials: HTTPAuthorizationCredentials = De
         )
         prompt = prompt_template.format(**prompt_dict)
 
-        gpt_model = ChatOpenAI(model="gpt-4-1106-preview", openai_api_key=openai_api_key)
-        response = gpt_model.invoke([HumanMessage(content=prompt)])
+        # LangChain OpenAI 통합: model 인자 사용
+        from langchain_openai import ChatOpenAI
+        chat_model = ChatOpenAI(model="gpt-4o-mini", api_key=openai_api_key, temperature=0)
 
-        user_conversation.append(f"assistant: {response.content}")
+        from langchain_core.messages import SystemMessage, HumanMessage
+        messages = [
+            SystemMessage(content="너는 친근한 친구야."),
+            HumanMessage(content=prompt),
+        ]
+
+        # 단일 호출은 ainvoke 사용 -> AIMessage 반환
+        response_msg = await chat_model.ainvoke(messages)
+
+        assistant_text = response_msg.content
+        user_conversation.append(f"assistant: {assistant_text}")
         logger.info("Response generated successfully")
 
-        return {"message": response.content}
+        return {"message": assistant_text}
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
