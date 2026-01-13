@@ -68,10 +68,14 @@ jobs:
           docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           docker stop ${{ env.NAME }} || true
           docker rm ${{ env.NAME }} || true
-          docker run -d -p 8000:8000 --name ${{ env.NAME }} --restart always \
-            --env-file ${{ github.workspace }}/.env \
-            -e OPENAI_API_KEY=$OPENAI_API_KEY \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          docker run -d -p 8000:8000 \
+          --name ${{ env.NAME }} \
+          --restart always \
+          -v chroma_data:/app/db \
+          --env-file ${{ github.workspace }}/.env \
+          -e OPENAI_API_KEY=$OPENAI_API_KEY \
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
 
       - name: Install Nginx and Setup SSL + Reverse Proxy
         run: |
