@@ -65,6 +65,9 @@ jobs:
           docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           docker stop ${{ env.NAME }} || true
           docker rm ${{ env.NAME }} || true
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          docker stop ${{ env.NAME }} || true
+          docker rm ${{ env.NAME }} || true
           docker run -d -p 8000:8000 --name ${{ env.NAME }} --restart always \
             --env-file ${{ github.workspace }}/.env \
             -e OPENAI_API_KEY=$OPENAI_API_KEY \
