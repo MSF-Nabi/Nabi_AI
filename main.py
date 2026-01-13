@@ -68,8 +68,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction):
 # ChromaDB 초기화
 try:
     logger.info("Initializing Chroma database")
-    CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", "/app/db")
-    client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
+    client = chromadb.PersistentClient(path='db')
     embedding_function = OpenAIEmbeddingFunction(openai_api_key)
     collection = client.get_or_create_collection(
         name="diary_entries",
@@ -89,27 +88,28 @@ def get_kst_now():
 
 def create_prompt(conversation: List[str], new_question: str, retrieved_context: str) -> dict:
     today = get_kst_now()
+
     system_message = f"""
-    너는 user와 매우 친한 친구야. 그리고 아는 것이 매우 많아.
-    만약, 사용자가 질문을 그만해달라고 하면 질문하지말고 공감만 해.
-    대화 맥락이 끝나면 이전 대화랑 관련된 주제를 먼저 꺼내.
-    사용자와 비슷한 횟수로 질문 빈도를 조절해. 대답 한번에 최대 질문은 1개 까지만.
-    사용자의 일기(User's Diary)에서 아는 게 있으면 이를 바탕으로 대답하고, 모를 경우 아는 척은 하지 마.
-    질문보다는 감정적인 공감을 많이 해줘. 너는 공감을 잘해주는 사람이야.
-    만약, 일기 데이터에서 검색이 필요 없는 질문이면 이전 답변들을 참조해서 답변해주고, 그렇지 않으면 일기 데이터를 참조해서 답변해줘.
-    모르는 정보가 나오면 차라리 다시 물어봐.
-    너는 반말을 항상 써 그리고 한국인이야.
-    오늘 날짜는 {today}야. 필요하면 자연스럽게 대화 중에 날짜를 언급해줘.
-    다시 말하지만 너무 빈번한 질문은 자제해줘.
-    답변은 sns 채팅처럼 간결히 부탁해.
+    너는 사용자의 아주 친한 친구야.
+    AI나 상담사처럼 말하지 말고 사람처럼 반말로 대화해.
+    정답을 주려 하지 말고 감정을 먼저 공감해.
+    질문은 감정을 이해하는 데 필요할 때만 한 번만 해.
+    모르는 건 아는 척하지 말고 자연스럽게 다시 물어봐.
+    일기 내용은 이미 알고 있는 기억처럼 자연스럽게 써.
+    질문이 감정을 더 깊이 이해하는 데 도움이 될 때만 질문해.
+    질문이 필요 없다면 공감만 해.
+    오늘 날짜는 {today}야.
     """
+
     previous_log = "\n".join(conversation)
+
     return {
-        "system_message": system_message,
-        "context": retrieved_context,
-        "new_question": new_question,
-        "previous_log": previous_log
+        "system_message": system_message.strip(),
+        "context": retrieved_context.strip(),
+        "new_question": new_question.strip(),
+        "previous_log": previous_log.strip()
     }
+
 
 
 def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
@@ -233,23 +233,26 @@ async def query_api(query: Query, credentials: HTTPAuthorizationCredentials = De
 
         prompt_dict = create_prompt(user_conversation, query.question, retrieved_context)
         prompt_template = PromptTemplate(
-            input_variables=["system_message", "previous_log", "context", "new_question"],
+            input_variables=["context", "previous_log", "new_question"],
             template="""
-                {system_message}
-
-                User's Diary:
-                {context}
-
-                User Query:
-                {new_question}
-
-                Previous_log:
-                {previous_log}
-
-                assistant Response:
-                """
-        )
+            지금 너는 사용자와 대화 중이야.
+    
+            [네가 기억하고 있는 사용자 이야기]
+            {context}
+    
+            [지금까지의 대화 흐름]
+            {previous_log}
+    
+            [사용자가 방금 한 말]
+            {new_question}
+    
+            위 상황에서,
+            사용자의 감정을 먼저 공감하고
+            친한 친구처럼 자연스럽게 답해줘.
+            """
+            )
         prompt = prompt_template.format(**prompt_dict)
+        logger.info(f"prompt: {prompt}")
 
         # LangChain OpenAI 통합: model 인자 사용
         from langchain_openai import ChatOpenAI
@@ -257,7 +260,7 @@ async def query_api(query: Query, credentials: HTTPAuthorizationCredentials = De
 
         from langchain_core.messages import SystemMessage, HumanMessage
         messages = [
-            SystemMessage(content="너는 친근한 친구야."),
+            SystemMessage(content=prompt_dict["system_message"]),
             HumanMessage(content=prompt),
         ]
 
