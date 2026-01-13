@@ -68,7 +68,8 @@ class OpenAIEmbeddingFunction(EmbeddingFunction):
 # ChromaDB 초기화
 try:
     logger.info("Initializing Chroma database")
-    client = chromadb.PersistentClient(path='db')
+    CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", "/app/db")
+    client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
     embedding_function = OpenAIEmbeddingFunction(openai_api_key)
     collection = client.get_or_create_collection(
         name="diary_entries",
