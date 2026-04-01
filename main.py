@@ -259,7 +259,7 @@ async def query_api(query: Query, credentials: HTTPAuthorizationCredentials = De
 
         # LangChain OpenAI 통합: model 인자 사용
         from langchain_openai import ChatOpenAI
-        chat_model = ChatOpenAI(model="gpt-4o-mini", api_key=openai_api_key, temperature=0)
+        chat_model = ChatOpenAI(model="gpt-5-nano", api_key=openai_api_key, temperature=0)
 
         from langchain_core.messages import SystemMessage, HumanMessage
         messages = [
