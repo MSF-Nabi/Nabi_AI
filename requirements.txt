@@ -5,6 +5,6 @@ uvicorn>=0.18.3
 openai>=1.109.1
 langchain>=1.0.0
 langchain-openai>=1.0.0
-langchain-community>=1.0.0  # (버전을 1.0.x로 맞추거나, 아예 버전 명시를 지우고 최신으로 따라가게 두는 것을 추천)
+langchain-community>=0.4.0  # <--- 이 부분을 0.4.0 이상으로 수정!
 langchain-chroma>=0.1.4
 chromadb>=0.5.3
