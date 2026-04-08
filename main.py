@@ -19,6 +19,7 @@ from langchain_openai import OpenAIEmbeddings
 app = FastAPI()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -27,11 +28,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 class DiarysEntrys(BaseModel):
     userId: str
     diarys: str
-
 
 class UpdateDiaryEntry(BaseModel):
     id: str
@@ -39,23 +38,19 @@ class UpdateDiaryEntry(BaseModel):
     content: str
     date: str
 
-
 class DiaryEntry(BaseModel):
     userId: str
     content: str
     date: str
-
 
 class Query(BaseModel):
     userId: str
     question: str
     chatHistory: List[str]
 
-
 load_dotenv()
 security = HTTPBearer()
 openai_api_key = os.getenv("OPENAI_API_KEY")
-
 
 class OpenAIEmbeddingFunction(EmbeddingFunction):
     def __init__(self, openai_api_key):
@@ -63,7 +58,6 @@ class OpenAIEmbeddingFunction(EmbeddingFunction):
 
     def __call__(self, input: Documents) -> Embeddings:
         return self.openai_embeddings.embed_documents(input)
-
 
 # ChromaDB 초기화
 try:
@@ -79,43 +73,42 @@ except Exception as e:
     logger.error(f"Error during initialization: {str(e)}", exc_info=True)
     raise
 
-
 def get_kst_now():
     utc_now = datetime.now(timezone.utc)
     kst_now = utc_now + timedelta(hours=9)
     return kst_now.strftime('%B %d, %Y')
 
-
 def create_prompt(conversation: List[str], new_question: str, retrieved_context: str) -> dict:
     today = get_kst_now()
-    system_message = f"""
-    너는 user와 매우 친한 친구야. 그리고 아는 것이 매우 많아.
-    만약, 사용자가 질문을 그만해달라고 하면 질문하지말고 공감만 해.
-    대화 맥락이 끝나면 이전 대화랑 관련된 주제를 먼저 꺼내.
-    사용자와 비슷한 횟수로 질문 빈도를 조절해. 대답 한번에 최대 질문은 1개 까지만.
-    사용자의 일기(User's Diary)에서 아는 게 있으면 이를 바탕으로 대답하고, 모를 경우 아는 척은 하지 마.
-    질문보다는 감정적인 공감을 많이 해줘. 너는 공감을 잘해주는 사람이야.
-    만약, 일기 데이터에서 검색이 필요 없는 질문이면 이전 답변들을 참조해서 답변해주고, 그렇지 않으면 일기 데이터를 참조해서 답변해줘.
-    모르는 정보가 나오면 차라리 다시 물어봐.
-    너는 반말을 항상 써 그리고 한국인이야.
-    오늘 날짜는 {today}야. 필요하면 자연스럽게 대화 중에 날짜를 언급해줘.
-    다시 말하지만 너무 빈번한 질문은 자제해줘.
-    답변은 sns 채팅처럼 간결히 부탁해.
-    """
-    previous_log = "\n".join(conversation)
-    return {
-        "system_message": system_message,
-        "context": retrieved_context,
-        "new_question": new_question,
-        "previous_log": previous_log
-    }
 
+    system_message = f"""
+    너는 사용자의 아주 친한 친구야.
+    AI나 상담사처럼 말하지 말고 사람처럼 반말로 대화해.
+    정답을 주려 하지 말고 감정을 먼저 공감해.
+    일기 내용은 이미 알고 있는 기억처럼 자연스럽게 써.
+    모르는 건 아는 척하지 말고 자연스럽게 다시 물어봐.
+    오늘 날짜는 {today}야.
+    
+    같은 의미의 문장이나 표현을 반복하지 마.
+    이전 대화에서 쓴 말투·표현·구조는 최대한 피해서 말해.
+    공감 표현은 매번 다른 방식으로 짧게 말해.
+    
+    질문이 필요하지 않다면 공감만 하고 대화를 끝내도 돼.
+    """
+
+    previous_log = "\n".join(conversation)
+
+    return {
+        "system_message": system_message.strip(),
+        "context": retrieved_context.strip(),
+        "new_question": new_question.strip(),
+        "previous_log": previous_log.strip()
+    }
 
 def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     if not credentials or credentials.scheme != "Bearer" or credentials.credentials != openai_api_key:
         raise HTTPException(status_code=403, detail="Invalid authentication")
     return credentials.credentials
-
 
 @app.post("/diarys")
 async def add_diarys(entry: DiarysEntrys, credentials: HTTPAuthorizationCredentials = Depends(security)):
@@ -138,7 +131,6 @@ async def add_diarys(entry: DiarysEntrys, credentials: HTTPAuthorizationCredenti
         logger.error(f"Error adding diary entries: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.post("/diary")
 async def add_diary(entry: DiaryEntry, credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
@@ -153,7 +145,6 @@ async def add_diary(entry: DiaryEntry, credentials: HTTPAuthorizationCredentials
     except Exception as e:
         logger.error(f"Error adding diary entry: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.put("/diary")
 async def update_diary(entry: UpdateDiaryEntry, credentials: HTTPAuthorizationCredentials = Depends(security)):
@@ -170,7 +161,6 @@ async def update_diary(entry: UpdateDiaryEntry, credentials: HTTPAuthorizationCr
         logger.error(f"Error updating diary entry: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.delete("/diary")
 async def delete_diary(id: str, credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
@@ -181,17 +171,18 @@ async def delete_diary(id: str, credentials: HTTPAuthorizationCredentials = Depe
     except Exception as e:
         logger.error(f"Error deleting diary entry: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
 @app.delete("/diaries")
 async def delete_diarys(id: str, credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
-        logger.info(f"Deleting all diarys: {id}")
+        logger.info(f"Deleting all diarys for user: {id}")
         collection.delete(
             where={"userId": id},
         )
-        logger.info("Diary entry successfully deleted")
-        return {"message": "Diary entry has been successfully deleted."}
+        logger.info("All Diary entries successfully deleted")
+        return {"message": "All Diary entries have been successfully deleted."}
     except Exception as e:
-        logger.error(f"Error deleting diary entry: {str(e)}", exc_info=True)
+        logger.error(f"Error deleting diary entries: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/diary")
@@ -205,11 +196,10 @@ async def get_diary(id: str, credentials: HTTPAuthorizationCredentials = Depends
         logger.error(f"Error fetching diary entry: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.post("/query")
 async def query_api(query: Query, credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
-        logger.info(f"Received query for user: {query.userId}")
+        logger.info(f"Received query for user: {query.userId} | Question: {query.question}")
         user_conversation = query.chatHistory
         user_conversation.append(f"user: {query.question}")
 
@@ -218,8 +208,9 @@ async def query_api(query: Query, credentials: HTTPAuthorizationCredentials = De
             n_results=3,
             where={"userId": str(query.userId)}
         )
-        print(results)
-        logger.info(f"Documents in results: {results.get('documents')}")
+        
+        # 수정 1: 지저분하게 나오던 원시 데이터 print(results) 제거
+        logger.info(f"Documents found in DB: {results.get('documents')}")
 
         # 안전 처리: 검색 결과가 비었을 때
         docs_batches = (results or {}).get("documents") or []
@@ -232,40 +223,45 @@ async def query_api(query: Query, credentials: HTTPAuthorizationCredentials = De
 
         prompt_dict = create_prompt(user_conversation, query.question, retrieved_context)
         prompt_template = PromptTemplate(
-            input_variables=["system_message", "previous_log", "context", "new_question"],
+            input_variables=["context", "previous_log", "new_question"],
             template="""
-                {system_message}
-
-                User's Diary:
-                {context}
-
-                User Query:
-                {new_question}
-
-                Previous_log:
-                {previous_log}
-
-                assistant Response:
-                """
-        )
+            지금 너는 사용자와 대화 중이야.
+    
+            [네가 기억하고 있는 사용자 이야기]
+            {context}
+    
+            [지금까지의 대화 흐름]
+            {previous_log}
+    
+            [사용자가 방금 한 말]
+            {new_question}
+    
+            위 상황에서,
+            사용자의 감정을 먼저 공감하고
+            친한 친구처럼 자연스럽게 답해줘.
+            """
+            )
         prompt = prompt_template.format(**prompt_dict)
+        logger.info("Prompt formatted successfully.") # 로그가 너무 길어지지 않게 수정
 
-        # LangChain OpenAI 통합: model 인자 사용
+        # gpt-5-nano 모델 호출 (temperature=0 파라미터는 이전 에러 원인일 수 있어 제거를 권장하지만, 잘 돌아갔다면 유지)
         from langchain_openai import ChatOpenAI
-        chat_model = ChatOpenAI(model="gpt-4o-mini", api_key=openai_api_key, temperature=0)
+        chat_model = ChatOpenAI(model="gpt-5-nano", api_key=openai_api_key)
 
         from langchain_core.messages import SystemMessage, HumanMessage
         messages = [
-            SystemMessage(content="너는 친근한 친구야."),
+            SystemMessage(content=prompt_dict["system_message"]),
             HumanMessage(content=prompt),
         ]
 
         # 단일 호출은 ainvoke 사용 -> AIMessage 반환
         response_msg = await chat_model.ainvoke(messages)
-
         assistant_text = response_msg.content
         user_conversation.append(f"assistant: {assistant_text}")
-        logger.info("Response generated successfully")
+        
+        # 수정 2: AI의 실제 답변을 로그에 깔끔하게 출력
+        logger.info(f"AI Response: {assistant_text}")
+        logger.info("Query processed successfully")
 
         return {"message": assistant_text}
     except Exception as e:
