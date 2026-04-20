@@ -5,6 +5,7 @@ import logging
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -142,6 +143,34 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
 @app.get("/")
 def read_root():
     return {"test": "success"}
+
+
+@app.get("/health")
+def health_check():
+    checks = {}
+
+    # ChromaDB 연결 확인
+    try:
+        chroma_client.heartbeat()
+        checks["chromadb"] = "ok"
+    except Exception as e:
+        logger.warning(f"ChromaDB health check failed: {e}")
+        checks["chromadb"] = "error"
+
+    # OpenAI API 키 설정 확인
+    checks["openai_key"] = "ok" if openai_api_key else "missing"
+
+    is_healthy = all(v == "ok" for v in checks.values())
+    status_code = 200 if is_healthy else 503
+
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "status": "ok" if is_healthy else "degraded",
+            "timestamp": datetime.now(KST).isoformat(),
+            "checks": checks,
+        },
+    )
 
 
 @app.post("/diarys")
