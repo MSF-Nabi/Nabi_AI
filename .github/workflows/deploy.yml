@@ -3,6 +3,7 @@ name: Deploy with Docker and Setup Nginx + SSL
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
@@ -39,7 +40,7 @@ jobs:
 
   deploy:
     needs: build-and-push
-    runs-on: [ self-hosted, label-nabi ]  # EC2 또는 SSH 연결 가능한 러너
+    runs-on: [ self-hosted, label-nabi-new ]  # EC2 또는 SSH 연결 가능한 러너 (시드니 nabi-ai-sydney)
     permissions:
       contents: read
       packages: read
