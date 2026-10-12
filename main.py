@@ -1,6 +1,5 @@
 from datetime import datetime, timedelta, timezone
 import os
-import re
 import logging
 
 from dotenv import load_dotenv
@@ -11,8 +10,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from pydantic import BaseModel
-from typing import List
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import List, Optional
 import chromadb
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
@@ -38,9 +37,21 @@ KST = timezone(timedelta(hours=9))
 
 # --- Models ---
 
+class DiaryItem(BaseModel):
+    model_config = ConfigDict(coerce_numbers_to_str=True)  # 숫자 PK(예: 15)도 "15"로 받음
+
+    id: str = Field(pattern=r"\S")  # 호출 측 일기 PK, RUD에 그대로 사용
+    date: str
+    content: str = Field(min_length=1)
+
+    @field_validator("date")
+    @classmethod
+    def normalize_date(cls, v: str) -> str:
+        return datetime.strptime(v, "%Y-%m-%d").strftime("%Y-%m-%d")
+
 class DiarysEntrys(BaseModel):
-    userId: str
-    diarys: str
+    userId: str = Field(pattern=r"\S")
+    diarys: List[DiaryItem] = Field(min_length=1)
 
 class DiaryEntry(BaseModel):
     userId: str
@@ -48,6 +59,8 @@ class DiaryEntry(BaseModel):
     date: str
 
 class UpdateDiaryEntry(BaseModel):
+    model_config = ConfigDict(coerce_numbers_to_str=True)  # /diarys와 같이 숫자 ID도 허용
+
     id: str
     userId: str
     content: str
@@ -138,6 +151,15 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     return credentials.credentials
 
 
+def ensure_owned_diary(diary_id: str, user_id: Optional[str]) -> None:
+    # 없는 ID는 404, userId가 주어졌는데 주인이 다르면 403
+    found = collection.get(ids=[diary_id])
+    if not found["ids"]:
+        raise HTTPException(status_code=404, detail="Diary entry not found")
+    if user_id is not None and (found["metadatas"][0] or {}).get("userId") != user_id:
+        raise HTTPException(status_code=403, detail="Diary entry belongs to another user")
+
+
 # --- Routes ---
 
 @app.get("/")
@@ -175,21 +197,44 @@ def health_check():
 
 @app.post("/diarys")
 async def add_diarys(entry: DiarysEntrys, _: str = Depends(verify_token)):
-    try:
-        logger.info(f"Adding diary entries for user: {entry.userId}")
-        existing = collection.get(where={"userId": entry.userId})
-        if existing["ids"]:
-            collection.delete(ids=existing["ids"])
+    # 사용자의 일기 전체를 요청 목록으로 교체. ids는 요청 순서 그대로, deleted는 빠져서 지워진 일기
+    ids = [item.id for item in entry.diarys]
+    if len(set(ids)) != len(ids):
+        raise HTTPException(status_code=422, detail="Duplicate diary ids in request")
+    if len(ids) > chroma_client.get_max_batch_size():
+        raise HTTPException(status_code=413, detail=f"Too many diaries in one request (max {chroma_client.get_max_batch_size()})")
 
-        diary_entries = re.findall(r"(\d{4}-\d{2}-\d{2}): ([^\n]+)", entry.diarys)
-        for date, content in diary_entries:
-            collection.add(
-                documents=[content],
-                metadatas=[{"userId": entry.userId, "date": date}],
-                ids=[f"{entry.userId}_{date}"],
-            )
-        logger.info("Diary entries successfully added")
-        return {"message": "Diary entries have been successfully embedded and saved."}
+    try:
+        logger.info(f"Replacing diary entries for user: {entry.userId} ({len(ids)} entries)")
+        documents = [item.content for item in entry.diarys]
+        # 임베딩은 이벤트 루프를 막지 않게 비동기로 먼저 계산 (실패 시 기존 일기는 그대로)
+        embeddings = await embedding_function.openai_embeddings.aembed_documents(documents)
+
+        # 아래는 await 없이 한 번에 실행: 소유권 확인 → upsert → 빠진 일기 삭제
+        taken = collection.get(ids=ids)
+        foreign = [
+            diary_id for diary_id, meta in zip(taken["ids"], taken["metadatas"])
+            if (meta or {}).get("userId") != entry.userId
+        ]
+        if foreign:
+            raise HTTPException(status_code=409, detail=f"Diary ids already used by another user: {foreign}")
+
+        existing = collection.get(where={"userId": entry.userId})
+        collection.upsert(
+            ids=ids,
+            embeddings=embeddings,
+            documents=documents,
+            metadatas=[{"userId": entry.userId, "date": item.date} for item in entry.diarys],
+        )
+        new_ids = set(ids)
+        deleted = [diary_id for diary_id in existing["ids"] if diary_id not in new_ids]
+        if deleted:
+            collection.delete(ids=deleted)
+
+        logger.info(f"Diary entries successfully saved ({len(deleted)} removed)")
+        return {"message": "Diary entries have been successfully embedded and saved.", "ids": ids, "deleted": deleted}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error adding diary entries: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -216,6 +261,7 @@ async def add_diary(entry: DiaryEntry, _: str = Depends(verify_token)):
 async def update_diary(entry: UpdateDiaryEntry, _: str = Depends(verify_token)):
     try:
         logger.info(f"Updating diary entry for user: {entry.userId}")
+        ensure_owned_diary(entry.id, entry.userId)
         collection.update(
             ids=[entry.id],
             documents=[entry.content],
@@ -223,18 +269,23 @@ async def update_diary(entry: UpdateDiaryEntry, _: str = Depends(verify_token)):
         )
         logger.info("Diary entry successfully updated")
         return {"id": entry.id}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error updating diary entry: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.delete("/diary")
-async def delete_diary(id: str, _: str = Depends(verify_token)):
+async def delete_diary(id: str, userId: Optional[str] = None, _: str = Depends(verify_token)):
     try:
         logger.info(f"Deleting diary entry: {id}")
+        ensure_owned_diary(id, userId)
         collection.delete(ids=[id])
         logger.info("Diary entry successfully deleted")
         return {"message": "Diary entry has been successfully deleted."}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error deleting diary entry: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
