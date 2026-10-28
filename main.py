@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import os
+import re
 import logging
 
 from dotenv import load_dotenv
@@ -105,7 +106,7 @@ PROMPT_TEMPLATE = PromptTemplate(
     template="""
     지금 너는 사용자와 대화 중이야.
 
-    [네가 기억하고 있는 사용자 이야기]
+    [네가 기억하고 있는 사용자 일기 (날짜: 내용)]
     {context}
 
     [지금까지의 대화 흐름]
@@ -123,8 +124,12 @@ PROMPT_TEMPLATE = PromptTemplate(
 
 # --- Helpers ---
 
+WEEKDAYS_KO = "월화수목금토일"
+
+
 def get_kst_now() -> str:
-    return datetime.now(KST).strftime('%B %d, %Y')
+    now = datetime.now(KST)
+    return f"{now:%Y-%m-%d} ({WEEKDAYS_KO[now.weekday()]}요일)"
 
 
 def build_system_message() -> str:
@@ -137,12 +142,89 @@ AI나 상담사처럼 말하지 말고 사람처럼 반말로 대화해.
 모르는 건 아는 척하지 말고 자연스럽게 다시 물어봐.
 오늘 날짜는 {today}야.
 
+기억하는 일기에는 '2026-04-24: 내용'처럼 쓴 날짜가 붙어 있어.
+오늘 날짜와 비교해서 지난 일은 지난 일로 말해. 예전 일기를 오늘이나 어제 일처럼 말하지 마.
+사용자가 특정 날짜나 달에 뭐 했는지 물으면 그 날짜 일기 내용으로 구체적으로 답해.
+그 날짜 일기가 없다고 적혀 있으면 지어내지 말고 기억나는 일기가 없다고 말해.
+
 같은 의미의 문장이나 표현을 반복하지 마.
 이전 대화에서 쓴 말투·표현·구조는 최대한 피해서 말해.
 공감 표현은 매번 다른 방식으로 짧게 말해.
 
 질문이 필요하지 않다면 공감만 하고 대화를 끝내도 돼.
 """.strip()
+
+
+FULL_DATE_RE = re.compile(r"(\d{4})\s*(?:년|[-./])\s*(\d{1,2})\s*(?:월|[-./])\s*(\d{1,2})")
+MONTH_DAY_RE = re.compile(r"(?<!\d)(\d{1,2})\s*월\s*(\d{1,2})\s*일")
+SLASH_DATE_RE = re.compile(r"(?<![\d/])(\d{1,2})/(\d{1,2})(?![\d/])")
+YEAR_MONTH_RE = re.compile(r"(\d{4})\s*년\s*(\d{1,2})\s*월")
+MONTH_RE = re.compile(r"(?<!\d)(\d{1,2})\s*월")
+RELATIVE_DAYS = {"그저께": 2, "그제": 2, "어제": 1, "오늘": 0}
+
+
+def extract_question_dates(question: str, today) -> tuple[set, set]:
+    # 질문 속 날짜(YYYY-MM-DD)와 달(YYYY-MM). 연도가 없으면 오늘 기준 가장 최근 과거로 본다
+    days, months = set(), set()
+
+    def add_day(y, m, d):
+        try:
+            days.add(datetime(y, m, d).strftime("%Y-%m-%d"))
+        except ValueError:
+            pass
+
+    def add_recent_day(m, d):
+        year = today.year
+        try:
+            if datetime(year, m, d).date() > today:
+                year -= 1
+        except ValueError:
+            return
+        add_day(year, m, d)
+
+    def full(match):
+        add_day(*map(int, match.groups()))
+        return " "
+
+    def month_day(match):
+        add_recent_day(*map(int, match.groups()))
+        return " "
+
+    def year_month(match):
+        y, m = map(int, match.groups())
+        if 1 <= m <= 12:
+            months.add(f"{y:04d}-{m:02d}")
+        return " "
+
+    def month(match):
+        m = int(match.group(1))
+        if 1 <= m <= 12:
+            y = today.year if m <= today.month else today.year - 1
+            months.add(f"{y:04d}-{m:02d}")
+        return " "
+
+    text = FULL_DATE_RE.sub(full, question)
+    text = MONTH_DAY_RE.sub(month_day, text)
+    text = SLASH_DATE_RE.sub(month_day, text)
+    text = YEAR_MONTH_RE.sub(year_month, text)
+    MONTH_RE.sub(month, text)
+    for word, offset in RELATIVE_DAYS.items():
+        if word in question:
+            days.add((today - timedelta(days=offset)).strftime("%Y-%m-%d"))
+    return days, months
+
+
+def find_diaries_on_dates(user_id: str, days: set, months: set, limit: int = 10) -> list:
+    # 해당 날짜·달의 일기를 날짜순으로 (id, date, document)
+    if not days and not months:
+        return []
+    found = collection.get(where={"userId": user_id})
+    hits = [
+        (diary_id, (meta or {}).get("date", ""), doc)
+        for diary_id, meta, doc in zip(found["ids"], found["metadatas"], found["documents"])
+        if (meta or {}).get("date") in days or (meta or {}).get("date", "")[:7] in months
+    ]
+    return sorted(hits, key=lambda hit: hit[1])[:limit]
 
 
 def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
@@ -324,19 +406,28 @@ async def query_api(query: Query, _: str = Depends(verify_token)):
 
         history = query.chatHistory + [f"user: {query.question}"]
 
+        user_id = str(query.userId)
+        # 질문에 날짜가 있으면 그 날짜의 일기를 먼저 넣고, 그 뒤에 의미가 비슷한 일기를 붙인다
+        days, months = extract_question_dates(query.question, datetime.now(KST).date())
+        diaries = find_diaries_on_dates(user_id, days, months)
+
         results = collection.query(
             query_texts=[query.question],
             n_results=3,
-            where={"userId": str(query.userId)},
+            where={"userId": user_id},
         )
-        logger.info(f"Documents found in DB: {results.get('documents')}")
+        seen = {diary_id for diary_id, _, _ in diaries}
+        for diary_id, meta, doc in zip(results["ids"][0], results["metadatas"][0], results["documents"][0]):
+            if diary_id not in seen:
+                diaries.append((diary_id, (meta or {}).get("date", "날짜 모름"), doc))
+                seen.add(diary_id)
 
-        docs = ((results or {}).get("documents") or [[]])[0]
-        retrieved_context = "\n\n".join(
-            doc if isinstance(doc, str)
-            else f"{(doc.get('metadata') or {}).get('date', 'unknown date')}: {doc.get('document', '')}"
-            for doc in docs
-        )
+        context_lines = [f"{date}: {doc}" for _, date, doc in diaries]
+        missing_days = sorted(days - {date for _, date, _ in diaries})
+        context_lines += [f"({day} 날짜의 일기는 없음)" for day in missing_days]
+        logger.info(f"Dates in question: {sorted(days)} months: {sorted(months)}")
+        logger.info(f"Documents found in DB: {context_lines}")
+        retrieved_context = "\n\n".join(context_lines)
 
         prompt = PROMPT_TEMPLATE.format(
             context=retrieved_context.strip(),
